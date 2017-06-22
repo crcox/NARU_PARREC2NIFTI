@@ -2,7 +2,7 @@
 An SPM plugin to handle converting Philips PAR/REC files to NIFTI, with support for Dual Echo protocols.
 
 ## Installation
-Just take all the Matlab code in this repository and stick it into your spm/toolbox directory. For example, on my system, the code is installed to `C:\Users\mbmhscc4\MATLAB\Toolboxes\spm12\toolbox\PARREC2NIFTI`. Everything prior to `spm12/` will of course be different for you. This has not been tested with SPM8, but I do not forsee compatibility issues.
+Just take all the Matlab code in this repository and stick it into a folder you create in your spm/toolbox directory. For example, on my system, the code is installed to `C:\Users\mbmhscc4\MATLAB\Toolboxes\spm12\toolbox\PARREC2NIFTI`. Everything prior to `spm12/` will of course be different for you. This has not been tested with SPM8, but I do not forsee compatibility issues.
 
 If you do not use Git, the easiest way to get the code is to download everything as a .zip file. The option to do so is near the top of this page: click "Clone or download" and select "download zip".
 
