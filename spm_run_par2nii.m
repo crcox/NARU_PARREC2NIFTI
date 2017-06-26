@@ -27,7 +27,7 @@ for j = 1:numel(job.dataset)
         otherwise
             parfiles = job.dataset(j).parfiles;
             protocol_label = job.dataset(j).stype.(p).label;
-            convert_par_to_nii( job.dataset(j).parfiles, outdir, job.dataset(j).stype.(p));
+            convert_par_to_nii( job.dataset(j).parfiles, outdir, protocol_label);
     end
 end
 out = [];
