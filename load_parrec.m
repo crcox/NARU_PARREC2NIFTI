@@ -334,7 +334,11 @@ function targetstruct = parse_par_structured_text(targetstruct, partext)
     selection_beg = rowfind(partext, '= GENERAL INFORMATION =') + 1;
     selection_end = rowfind(partext, '= PIXEL VALUES =') - 1;
     parstructtext = partext(selection_beg:selection_end);
-
+    
+    if exist('strsplit', 'file') ~= 2
+        strsplit = @strsplit_;
+    end
+    
     % Clean the data of troublesome characters
     parstructtext = strrep(parstructtext, 'Max.', 'Max');
 
@@ -354,6 +358,13 @@ function targetstruct = parse_par_structured_text(targetstruct, partext)
     end
     targetstruct.Angulation_midslice = targetstruct.Angulation_midslice([3,1,2]);
     targetstruct.Off_Centre_midslice = targetstruct.Off_Centre_midslice([3,1,2]);
+    
+    function c = strsplit_(s, pattern)
+        if nargin == 1
+            pattern = '\s+';
+        end 
+        c = regexp(s,pattern,'split');
+    end
 end
 
 function row_id = rowfind(TEXT, PATTERN)
