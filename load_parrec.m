@@ -1,7 +1,6 @@
-function [dynamics, image_meta, image_info] = ...
-    load_parrec(filename, version, dataformat_source, bits_source, dataformat_target, bits_target)
+function [dynamics, image_meta, image_info] = load_parrec(filename, varargin)
 % dualecho.LOAD_PARREC Load binary image data from PAR/REC file pair.
-% 
+%
 %  import(dualecho)
 %  [dynamics] = load_parrec(filename) Read dynamic volumes from
 %      Phillips PAR/REC into a structured array. The structure will contain
@@ -28,9 +27,6 @@ function [dynamics, image_meta, image_info] = ...
 %        worth loading data as int16 and uint16 (particularly for DTI data,
 %        see link above for anecdotal evidence) and proving that they are
 %        the same.
-%        !!! The previous statement isn't true anymore... I am running with
-%        uint16 as the default since that is what Nibable and many others
-%        are assuming.
 %
 %  CRC: I have checked the procedure below against the procedure included
 %  as part of dual_echo_analyse.m and they produce identical matrices.
@@ -51,16 +47,21 @@ function [dynamics, image_meta, image_info] = ...
 %
 % <Chris Cox 23/03/2017>
 % <Adapted from work by Ajay Halai>
+    p = inputParser();
+    addRequired(p, 'filename', @ischar);
+    addParameter(p, 'RIET_version', 'v4.2', @ischar);
+    addParameter(p, 'dataformat_source', 'int16', @ischar);
+    addParameter(p, 'dataformat_target', 'float', @ischar);
+    addParameter(p, 'fliplr', false, @islogical);
+    parse(p, filename, varargin{:});
 
-    % KARLS_RESCALEFACTOR = 1000;
+    KARLS_RESCALEFACTOR = 1000;
     % CRC: For the time being, I am operating without this as a default.
-    DEFAULT_TARGET_DATAFORMAT = 'double';
-    % N.B. if left empty, will also default to source type.
     % Since this function loads the data into memory and returns it for
     % further analysis we probably want to load as double. If loaded as
     % double, and the data were stored as integers in the REC file, the
     % returned values will be scaled.
-    if iscell(filename) 
+    if iscell(filename)
         if numel(filename) == 1
             filename = filename{1};
         else
@@ -79,33 +80,34 @@ function [dynamics, image_meta, image_info] = ...
     fclose(fid);
 
     % if version number is not provided, look it up.
-    if nargin < 2 || isempty(version)
+    if isempty(p.Results.RIET_version)
         version = get_RIET_version(data_description);
+    else
+        version = p.Results.RIET_version;
     end
-    
+
     %% Initialize data structures
     image_meta = init_meta_struct(version);
     image_info = init_info_struct(version);
-    
+
     %% Parse metadata
     image_meta = parse_par_structured_text(image_meta, data_description);
-    
+
     %% Parse image info
     image_info = parse_par_tabular_text(image_info, data_description);
-    
+
     %% Parse data and information by protocol/echo type (and return)
     [dynamics, dyn_ind] = info_by_configuration(image_info, version);
     % dyn_ind gives a selector for each slice. Since we need to select by
     % volume, and protocol information is not varying by slice, we can
     % reshape so that each column corresponds to a volume containing slicen
     % slices, and skim off the first row to index into the volumes.
-    
+
     % extract number of slices and volumes (i.e., dynamics; determined by
     % gradient)
     slicen = image_meta.Max_number_of_slices;
     gradientn = image_meta.Max_number_of_dynamics * numel(dynamics);
-    %gradientn = 2 * gradient;
-    
+
     dyn_ind = reshape(dyn_ind, slicen, gradientn);
 
     % extract the pixel resolution of each slice
@@ -121,7 +123,7 @@ function [dynamics, image_meta, image_info] = ...
     RI = image_info(1).rescale_intercept(1,1);
     RS = image_info(1).rescale_slope(1,1);
     SS = image_info(1).scale_slope(1,1);
-    
+
     scalingfactor = 1/SS;
     scalingintercept = RI/(RS*SS);
 
@@ -131,60 +133,27 @@ function [dynamics, image_meta, image_info] = ...
     if length(image_info(1).slice_number) ~= num_images
         error('load_parrec:badMetaRead', 'The number of slices/images in the REC file implied by the max number of slices per volume and the number of volumes acquired differ from the number of slices listed in the info table. Either metadata is being misread or the source data may be corrupted.');
     end
-    
+
     %% Note echo times for each dynamic
     echo_number = image_info(1).echo_number;
     TE = image_info(1).echo_time;
     tmp = unique(sortrows([echo_number,TE]),'rows');
     % echo_index = tmp(:,1);
     TE_index = tmp(:,2);
-    
+
     %% Compose the data specification
     % If number of bits per value is not specified, read from file.
     % The data is most likely stored as a 16 bit integer. There is a
     % question as to whether it is signed or unsigned. We might want to
-    % represent the data as 
-    if nargin < 3 || isempty(dataformat_source)
-      dataformat_source = 'uint';
+    % represent the data as
+    bits_source = image_info(1).image_pixel_size(1);
+    if ~ismember(bits_source,[8, 16, 32, 64]);
+        error('load_parrec:badDataSpec', 'Attempted to read number of bits per value (in REC file) from PAR file, but got a value other than 8, 16, 32, or 64.');
+    elseif bits_source ~= expected_bitdepth(p.Results.dataformat_source);
+        error('load_parrec:badDataSpec', 'Number of bits per value (in REC file) does not match the expected bit depth of the source data format.');
     end
-    if nargin < 4 || isempty(bits_source)
-        bits_source = image_info(1).image_pixel_size(1);
-        if ~ismember(bits_source,[8, 16, 32, 64]);
-            error('load_parrec:badDataSpec', 'Attempted to read number of bits per value (in REC file) from PAR file, but got a value other than 8, 16, 32, or 64.');
-        end
-    end
-    if nargin < 5 || isempty(dataformat_target)
-        if isempty(DEFAULT_TARGET_DATAFORMAT)
-            dataformat_target = dataformat_source;
-        else
-            dataformat_target = DEFAULT_TARGET_DATAFORMAT;
-        end
-    end
-    if nargin < 6 || isempty(bits_target)
-        if strcmp(dataformat_target, dataformat_source)
-            bits_target = bits_source;
-        elseif strcmp(dataformat_target, 'float')
-            bits_target = 32;
-        elseif strcmp(dataformat_target, 'double')
-            bits_target = 64;
-        end
-    end
-    
-    switch dataformat_source
-    case {'float','double'}
-        dataformat_source_code = dataformat_source;
-    case {'int','uint'}
-        dataformat_source_code = sprintf('%s%d', dataformat_source, bits_source);
-    end
-    
-    switch dataformat_target
-    case {'float','double'}
-        dataformat_target_code = dataformat_target;
-    case {'int','uint'}
-        dataformat_target_code = sprintf('%s%d', dataformat_target, bits_target);
-    end
-    dataformatcode = sprintf('%s=>%s', dataformat_source_code, dataformat_target_code);
-    
+    dataformatcode = sprintf('%s=>%s', p.Results.dataformat_source, p.Results.dataformat_target);
+
     %% Report data info before reading
     fprintf('Started %s\n', datestr(now, 'dd mmmm yyyy, HH:MM:SS.FFF'));
     fprintf('PAR/REC export version: %s\n', version);
@@ -196,12 +165,12 @@ function [dynamics, image_meta, image_info] = ...
     fprintf('Total number of images (i.e., slices) to read from REC: %d\n', num_images);
     fprintf('Total number of data points (i.e., voxels) to read from REC: %d\n', num_elements);
     fprintf('Echo time(s):'); fprintf(' %.2f', TE_index); fprintf(' (ms)\n');
-    
+
     %% Read data from REC file
     fid = fopen(rec_fullfile); %open data stream for rec file
     img = fread(fid,num_elements,dataformatcode)'; % read stream as specified in dataformatcode
     fclose(fid);
-    
+
     %% Reshape and rescale vector into a recognizable format (3D+time).
     % CRC: When it comes to rescaling, there are two distinct formulas.
     % From the PAR header:
@@ -221,15 +190,18 @@ function [dynamics, image_meta, image_info] = ...
     % the data again to disk as a nifti file we would reverse the
     % operation:
     %   PV = uint16((FP - intercept) / slope);
-    if strcmpi(dataformat_target, 'double') && strcmpi(dataformat_source, 'int')
-        dual4d = (reshape(img,[x y slicen gradientn]) * scalingfactor) + scalingintercept; % ./ KARLS_RESCALEFACTOR;
+    if (strcmpi(p.Results.dataformat_target, 'double') || strcmpi(p.Results.dataformat_target, 'float')) && ~isempty(strfind(p.Results.dataformat_source, 'int'))
+        dual4d = ((reshape(img,[x y slicen gradientn]) * scalingfactor) + scalingintercept) ./ KARLS_RESCALEFACTOR;
     else
         dual4d = (reshape(img,[x y slicen gradientn]));
     end
-    
+
     % loop over the different types of dynamics and plug in the data.
     for i = 1:numel(dynamics)
         dynamics(i).data = dual4d(:,:,:,dyn_ind(1,:)==i);
+        if p.Results.fliplr
+            dynamics(i).data = fliplr(dynamics(i).data);
+        end
     end
 end
 
@@ -334,11 +306,11 @@ function targetstruct = parse_par_structured_text(targetstruct, partext)
     selection_beg = rowfind(partext, '= GENERAL INFORMATION =') + 1;
     selection_end = rowfind(partext, '= PIXEL VALUES =') - 1;
     parstructtext = partext(selection_beg:selection_end);
-    
-    if exist('strsplit', 'file') ~= 2
-        strsplit = @strsplit_;
-    end
-    
+
+%     if exist('strsplit', 'file') ~= 2
+%         strsplit = @strsplit_;
+%     end
+
     % Clean the data of troublesome characters
     parstructtext = strrep(parstructtext, 'Max.', 'Max');
 
@@ -358,13 +330,13 @@ function targetstruct = parse_par_structured_text(targetstruct, partext)
     end
     targetstruct.Angulation_midslice = targetstruct.Angulation_midslice([3,1,2]);
     targetstruct.Off_Centre_midslice = targetstruct.Off_Centre_midslice([3,1,2]);
-    
-    function c = strsplit_(s, pattern)
-        if nargin == 1
-            pattern = '\s+';
-        end 
-        c = regexp(s,pattern,'split');
-    end
+
+%     function c = strsplit_(s, pattern)
+%         if nargin == 1
+%             pattern = '\s+';
+%         end
+%         c = regexp(s,pattern,'split');
+%     end
 end
 
 function row_id = rowfind(TEXT, PATTERN)
@@ -389,7 +361,7 @@ function targetstruct = parse_par_tabular_text(targetstruct, partext)
     end
     targetstruct(1).image_angulation = targetstruct(1).image_angulation(:,[2,3,1]);
     targetstruct(1).image_offcentre = targetstruct(1).image_offcentre(:,[2,3,1]);
-    
+
     if cursor < size(M, 2);
       warning('load_parrec:parse_par_tabular_text:dataMismatch', 'Some columns of the image data were not parsed. The assignment of columns to fields may be incorrect.');
       choice = input('Continue anyway? y/[n]: ');
@@ -443,7 +415,7 @@ function [dynamics, ic] = info_by_configuration(image_info, version)
     otherwise
         error('load_parrec:info_by_configuration:unknownVersion', 'Unknown PAR/REC version.');
     end
-    
+
     M = struct2array(image_info_vary_by_cfg(1));
     n = struct2array(image_info_vary_by_cfg(2));
     [U, ~, ic] = unique(M, 'rows');
@@ -456,5 +428,18 @@ function [dynamics, ic] = info_by_configuration(image_info, version)
         dynamics(i).data = [];
         dynamics(i).run = [];
         dynamics(i).volume_index = find(volume_ind==i);
+    end
+end
+
+function bits = expected_bitdepth(dataformat)
+    switch dataformat
+        case {'uint8','int8'}
+            bits = 8;
+        case {'uint16','int16'}
+            bits = 16;
+        case {'uint32','int32','float'}
+            bits = 32;
+        case {'uint64','int64','double'}
+            bits = 64;
     end
 end
